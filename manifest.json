@@ -1,0 +1,79 @@
+{
+  "plugin_id": "neilmc78.metadata.omdb",
+  "version": "0.1.0",
+  "checksum": "__CHECKSUM__",
+  "silo_api_version": "v1",
+  "category": "Metadata",
+  "presentation": {
+    "display_name": "OMDb Metadata",
+    "summary": "Matches films TMDB does not list, such as fan films and fan edits, by their IMDb ID.",
+    "description_markdown": "Looks films up on [OMDb](https://www.omdbapi.com/), which is built from IMDb's data, and supplies the title, year, plot, genres, runtime, cast and poster. It is meant as the last source in a library's list, behind TMDB.\n\nOMDb's free key allows 1,000 requests a day, and Silo asks every source on every lookup, so the plugin only calls OMDb for a film with an IMDb ID and no TMDB ID, such as a folder named `Film (2010) {imdb-tt18183916}` or an IMDb ID entered in the Match dialog. Title searches are off unless you turn them on. Answers are kept for a day, and the plugin stops at its daily limit.",
+    "setup_markdown": "1. Get a free API key at https://www.omdbapi.com/apikey.aspx.\n2. Paste it under **OMDb**, save, and run **Check Connection**.\n3. In each movie library's metadata settings, keep this source below TMDB.\n4. For a film TMDB cannot find, add `{imdb-tt…}` to its folder name, or enter the IMDb ID in the Match dialog.",
+    "homepage_url": "https://github.com/neilmc78/silo-plugin-metadata-omdb",
+    "source_url": "https://github.com/neilmc78/silo-plugin-metadata-omdb",
+    "support_url": "https://github.com/neilmc78/silo-plugin-metadata-omdb/issues",
+    "changelog_url": "https://github.com/neilmc78/silo-plugin-metadata-omdb/releases",
+    "publisher_name": "neilmc78",
+    "publisher_url": "https://github.com/neilmc78",
+    "license_spdx": "AGPL-3.0-or-later"
+  },
+  "supported_platforms": [
+    {
+      "os": "linux",
+      "arch": "amd64"
+    },
+    {
+      "os": "linux",
+      "arch": "arm64"
+    }
+  ],
+  "capabilities": [
+    {
+      "type": "metadata_provider.v1",
+      "id": "omdb",
+      "display_name": "OMDb",
+      "description": "Films from OMDb (IMDb data) that TMDB does not list.",
+      "metadata": {
+        "default_priority": {
+          "movie": 90
+        }
+      }
+    }
+  ],
+  "global_config_schema": [
+    {
+      "key": "omdb",
+      "title": "OMDb",
+      "description": "Your OMDb API key and how many requests the plugin may spend.",
+      "json_schema": "{\"type\":\"object\",\"properties\":{\"api_key\":{\"type\":\"string\",\"writeOnly\":true},\"title_search\":{\"type\":\"boolean\"},\"daily_limit\":{\"type\":\"number\",\"minimum\":1,\"maximum\":100000}},\"additionalProperties\":false}",
+      "required": true,
+      "admin_form": {
+        "submit_label": "Save OMDb settings",
+        "fields": [
+          {
+            "key": "api_key",
+            "label": "API key",
+            "description": "From https://www.omdbapi.com/apikey.aspx. Stored encrypted.",
+            "control": "ADMIN_FORM_CONTROL_PASSWORD",
+            "secret": true,
+            "required": true
+          },
+          {
+            "key": "title_search",
+            "label": "Search by title",
+            "description": "Also search OMDb by title when no IMDb ID is known. Each automatic match then costs a request, so leave it off for large libraries.",
+            "control": "ADMIN_FORM_CONTROL_SWITCH",
+            "default_value": false
+          },
+          {
+            "key": "daily_limit",
+            "label": "Daily request limit",
+            "description": "The plugin stops calling OMDb after this many requests in a day (UTC). The free key allows 1,000.",
+            "control": "ADMIN_FORM_CONTROL_NUMBER",
+            "default_value": 900
+          }
+        ]
+      }
+    }
+  ]
+}
