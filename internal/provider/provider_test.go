@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -40,7 +41,7 @@ func (f *fakeOMDb) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"Response": "True", "Title": "Star War the Third Gathers: The Backstroke of the West",
 			"Year": "2010", "Released": "19 May 2010", "Runtime": "140 min", "Genre": "Action, Comedy, Sci-Fi",
 			"Director": "Timothy B. Morgan", "Writer": "Jeremy Winterson (adaptation)", "Actors": "Sum-Yeung Wong, Arielle Ceplina",
-			"Plot": "Mistranslated fan dub.", "Poster": "https://example.invalid/poster.jpg", "imdbRating": "8.8",
+			"Plot": "Mistranslated fan dub.", "Poster": "https://m.media-amazon.com/images/M/MV5Bposter@._V1_SX300.jpg", "imdbRating": "8.8",
 			"imdbID": fanFilm, "Type": "movie", "Rated": "N/A",
 		})
 	case keyCheckID:
@@ -160,5 +161,39 @@ func TestGetMetadataMapsTheFilm(t *testing.T) {
 	people := item.GetPeople()
 	if len(people) != 4 || people[3].GetName() != "Jeremy Winterson" || people[3].GetKind() != "Writer" {
 		t.Fatalf("people = %v", people)
+	}
+}
+
+func TestPostersTravelAsOMDbPathsAndResolveBySize(t *testing.T) {
+	p, _ := newTestProvider(t, "good-key", nil)
+	p.now = func() time.Time { return time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC) }
+	resp, err := p.GetMetadata(context.Background(), &pluginv1.GetMetadataRequest{ProviderId: fanFilm, ItemType: "movie"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := resp.GetItem().GetPosterPath()
+	if path != "omdb://m.media-amazon.com/images/M/MV5Bposter@._V1_SX300.jpg" {
+		t.Fatalf("poster path = %q", path)
+	}
+	for variant, want := range map[string]string{
+		"card":      "https://m.media-amazon.com/images/M/MV5Bposter@._V1_SX300.jpg",
+		"featured":  "https://m.media-amazon.com/images/M/MV5Bposter@._V1_SX600.jpg",
+		"original":  "https://m.media-amazon.com/images/M/MV5Bposter@._V1_.jpg",
+		"":          "https://m.media-amazon.com/images/M/MV5Bposter@._V1_.jpg",
+		"poster-xl": "https://m.media-amazon.com/images/M/MV5Bposter@._V1_.jpg",
+	} {
+		got, err := p.ResolveImageURL(context.Background(), &pluginv1.ResolveImageURLRequest{Path: path, Variant: variant})
+		if err != nil || got.GetUrl() != want {
+			t.Fatalf("variant %q: got %q (%v), want %q", variant, got.GetUrl(), err, want)
+		}
+	}
+	// Silo may hand over the path with or without the scheme.
+	bare := strings.TrimPrefix(path, "omdb://")
+	urls, _ := p.ResolveImageURLs(context.Background(), &pluginv1.ResolveImageURLsRequest{
+		Paths:   []string{bare, "omdb://evil.test/x.jpg"},
+		Variant: "card",
+	})
+	if urls.GetUrls()[bare] == "" || len(urls.GetUrls()) != 1 {
+		t.Fatalf("urls = %v", urls.GetUrls())
 	}
 }

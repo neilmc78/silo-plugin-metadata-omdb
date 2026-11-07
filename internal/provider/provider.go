@@ -346,7 +346,7 @@ func (p *Provider) GetImages(ctx context.Context, req *pluginv1.GetImagesRequest
 		return nil, err
 	}
 	if poster := value(title.Poster); poster != "" {
-		resp.Images = append(resp.Images, &pluginv1.ImageRecord{Kind: "poster", Url: poster})
+		resp.Images = append(resp.Images, &pluginv1.ImageRecord{Kind: "poster", Url: imagePath(poster)})
 	}
 	return resp, nil
 }
@@ -363,7 +363,7 @@ func searchResult(imdbID, name, year, plot, poster string) (*pluginv1.ProviderSe
 		Year:        int32(firstYear(year)),
 		Overview:    value(plot),
 		ProviderIds: ids,
-		ImageUrl:    value(poster),
+		ImageUrl:    imagePath(value(poster)),
 	}, nil
 }
 
@@ -384,7 +384,7 @@ func metadataItem(t omdb.Title) (*pluginv1.MetadataItem, error) {
 		Studios:       list(t.Production),
 		Countries:     list(t.Country),
 		ContentRating: value(t.Rated),
-		PosterPath:    value(t.Poster),
+		PosterPath:    imagePath(value(t.Poster)),
 		ReleaseDate:   releaseDate(t.Released),
 		People:        people(t),
 	}
@@ -466,4 +466,80 @@ func stringMap(s *structpb.Struct) map[string]string {
 		}
 	}
 	return out
+}
+
+// Silo stores plugin artwork as "<capability>://<path>" and asks the plugin
+// that owns the scheme to turn a path back into an address
+// (ResolveImageURL). A bare https URL would read as scheme "https", which no
+// plugin owns, so Silo would show no image. Posters therefore travel as
+// "omdb://<host>/<path>" and resolve to https on that host.
+const imageScheme = CapabilityID + "://"
+
+// posterHosts are the hosts OMDb serves posters from; a path naming any other
+// host does not resolve.
+var posterHosts = map[string]bool{
+	"m.media-amazon.com":              true,
+	"ia.media-imdb.com":               true,
+	"images-na.ssl-images-amazon.com": true,
+}
+
+// imagePath turns an OMDb poster URL into the path Silo stores.
+func imagePath(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	rest := strings.TrimPrefix(strings.TrimPrefix(raw, "https://"), "http://")
+	if rest == raw {
+		return ""
+	}
+	return imageScheme + rest
+}
+
+// amazonSize is the size suffix of an IMDb poster address, such as
+// "._V1_SX300.jpg"; replacing it picks another rendition of the same image.
+var amazonSize = regexp.MustCompile(`\._V1_[^/]*\.(jpg|jpeg|png)$`)
+
+// resolveImage turns a stored path back into an address at the size the
+// variant asks for: "card" a 300px-wide rendition, "featured" 600px,
+// "large" 1000px, and anything else (full, original, empty, or a variant this
+// plugin does not know) the original upload.
+func resolveImage(path, variant string) string {
+	rest := strings.TrimPrefix(strings.TrimSpace(path), imageScheme)
+	rest = strings.TrimPrefix(strings.TrimPrefix(rest, "https://"), "http://")
+	host, _, ok := strings.Cut(rest, "/")
+	if !ok || !posterHosts[strings.ToLower(host)] {
+		return ""
+	}
+	url := "https://" + rest
+	if !amazonSize.MatchString(url) {
+		return url
+	}
+	size := ""
+	switch variant {
+	case "card":
+		size = "SX300"
+	case "featured":
+		size = "SX600"
+	case "large":
+		size = "SX1000"
+	}
+	return amazonSize.ReplaceAllString(url, "._V1_"+size+".$1")
+}
+
+// ResolveImageURL turns one stored poster path into an address.
+func (p *Provider) ResolveImageURL(_ context.Context, req *pluginv1.ResolveImageURLRequest) (*pluginv1.ResolveImageURLResponse, error) {
+	return &pluginv1.ResolveImageURLResponse{Url: resolveImage(req.GetPath(), req.GetVariant())}, nil
+}
+
+// ResolveImageURLs turns stored poster paths into addresses; a path that does
+// not resolve is left out.
+func (p *Provider) ResolveImageURLs(_ context.Context, req *pluginv1.ResolveImageURLsRequest) (*pluginv1.ResolveImageURLsResponse, error) {
+	urls := make(map[string]string, len(req.GetPaths()))
+	for _, path := range req.GetPaths() {
+		if url := resolveImage(path, req.GetVariant()); url != "" {
+			urls[path] = url
+		}
+	}
+	return &pluginv1.ResolveImageURLsResponse{Urls: urls}, nil
 }
