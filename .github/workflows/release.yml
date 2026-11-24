@@ -26,7 +26,8 @@ concurrency:
 
 jobs:
   version:
-    if: github.ref == 'refs/heads/main'
+    # Forks build nothing here and never release.
+    if: github.repository == 'neilmc78/silo-plugin-metadata-omdb' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.release.outputs.version }}
