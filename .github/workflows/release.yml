@@ -1,59 +1,50 @@
 name: Release
 
+# Every merge to main is released by neilmc78/release-on-merge: the next
+# patch version by default, or the next minor or major one when the pull
+# request's title says [minor] or [major]. manifest.json carries that
+# version on the released commit (main isn't changed), then the binaries are
+# built from it and attached. Run this workflow by hand to release main
+# without a merge.
+
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - ".github/**"
   workflow_dispatch:
 
 permissions:
   contents: write
 
+# Two quick merges are released one after the other, never with one version.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   version:
+    # Forks build nothing here and never release.
+    if: github.repository == 'neilmc78/silo-plugin-metadata-omdb' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.version.outputs.version }}
-      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - name: Determine version
-        id: version
-        run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            tag="${GITHUB_REF_NAME}"
-            version="${tag#v}"
-          else
-            # Auto-increment patch from latest tag.
-            latest=$(git tag -l 'v*' --sort=-v:refname | head -n1)
-            if [ -z "$latest" ]; then
-              version="1.0.0"
-            else
-              base="${latest#v}"
-              IFS='.' read -r major minor patch <<< "$base"
-              patch=$((patch + 1))
-              version="${major}.${minor}.${patch}"
-            fi
-            tag="v${version}"
-
-            # Update manifest.json so the catalog tool sees the correct version.
-            jq --arg v "$version" '.version = $v' manifest.json > manifest.tmp && mv manifest.tmp manifest.json
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add manifest.json
-            git commit -m "chore: bump version to ${version}"
-            git tag "$tag"
-            # Push only the tag; the tag's commit carries the bumped manifest.
-            git push origin "refs/tags/${tag}"
-          fi
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+      - id: release
+        uses: neilmc78/release-on-merge@v1
+        with:
+          version-files: manifest.json
 
   build:
     needs: version
+    if: needs.version.outputs.tag != ''
     strategy:
       matrix:
         include:
@@ -108,8 +99,6 @@ jobs:
     needs: [version, build]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -126,12 +115,9 @@ jobs:
           done
           sort -u -o release/checksums.txt release/checksums.txt
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.version.outputs.tag }}
-          files: |
-            release/plugin-linux-amd64
-            release/plugin-linux-arm64
-            release/checksums.txt
-          generate_release_notes: true
+      # release-on-merge has already created the release, with its notes.
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: gh release upload "$TAG" release/plugin-linux-amd64 release/plugin-linux-arm64 release/checksums.txt --repo "$GITHUB_REPOSITORY" --clobber
